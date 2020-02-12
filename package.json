@@ -10,15 +10,34 @@
 		"Other"
 	],
 	"activationEvents": [
+			"*",
 			"workspaceContains:**/.osc"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
+				"command": "extension.create_OBS_Build_Conf",
+				"title": "Create OBS Build Config",
+				"category": "OBS"
+			},
+			{
 				"command": "extension.create_OBS_Builder",
-				"title": "Create OBS Builder"
+				"title": "Create OBS Builder",
+				"category": "OBS"
+			},
+			{
+				"command": "extension.clear_OBS_Builders",
+				"title": "Clear OBS Builders",
+				"category": "OBS"
+			},
+			{
+				"command": "extension.clear_OBS_BuildConfs",
+				"title": "Clear OBS Build Confs",
+				"category": "OBS"
 			}
+
+
 		]
 	},
 	"scripts": {
