@@ -10,11 +10,22 @@
 		"Other"
 	],
 	"activationEvents": [
-			"*",
 			"workspaceContains:**/.osc"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
+		"views": {
+			"explorer": [
+			  {
+				"id": "OBS_builders",
+				"name": "OBS Builder:"
+			  },
+			  {
+				  "id": "OBS_configs",
+				  "name": "OBS Buildconfigs"
+			  }
+			]
+		  },
 		"commands": [
 			{
 				"command": "extension.create_OBS_Build_Conf",
@@ -35,10 +46,18 @@
 				"command": "extension.clear_OBS_BuildConfs",
 				"title": "Clear OBS Build Confs",
 				"category": "OBS"
+			},
+			{
+				"command": "OBS_configs.buildEntry",
+				"title": "Build"
 			}
-
-
-		]
+		],
+		"menus": {
+			"view/item/context": [{
+				"command": "OBS_configs.buildEntry",
+				"group": "inline"
+			}]
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",

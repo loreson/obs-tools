@@ -4,43 +4,10 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { create } from 'domain';
 import { reporters } from 'mocha';
+import {Builder, BuilderProvider} from './obs_builder';
+import {Repository, BuildConfiguration, BuildConfigProvider, BuilderConfigTreeEntry} from './obs_buildconfig';
 
-class Builder
-{
-	name: string;
-	buildroot: string;
-	threads: number;
-	constructor(name: string, buildroot: string, threads: number)
-	{
-		this.name = name;
-		this.buildroot = buildroot;
-		this.threads = threads;
-	}
-}
 
-class Repository
-{
-	name: string;
-	architecture: string;
-	constructor(name: string, architecture: string)
-	{
-		this.name =name;
-		this.architecture = architecture;
-	}
-}
-
-class BuildConfiguration
-{
-	name: string;
-	repos: Repository[];
-	specFiles: string[];
-	constructor(name: string, repos: Repository[], specFiles: string[])
-	{
-		this.name = name;
-		this.repos = repos;
-		this.specFiles = specFiles;
-	}
-}
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -52,6 +19,11 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
+	const builderTreeProvider = new BuilderProvider(context);
+	vscode.window.registerTreeDataProvider('OBS_builders', builderTreeProvider);
+	const configTreeProvider = new BuildConfigProvider(context);
+	vscode.window.registerTreeDataProvider('OBS_configs', configTreeProvider);
+
 	let create_builder = vscode.commands.registerCommand('extension.create_OBS_Builder', () => {
 		// The code you place here will be executed every time your command is executed
 		create_OBS_Builder(context);
@@ -69,10 +41,16 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(clear_builder);
 	let clear_build_conf = vscode.commands.registerCommand("extension.clear_OBS_BuildConfs",()=>
 	{
-		context.globalState.update("BuildConfigurations", undefined);
+		context.workspaceState.update("BuildConfigurations", undefined);
 		vscode.window.showInformationMessage("cleared OBS build configurations");
-
 	});
+	context.subscriptions.push(clear_build_conf);
+	let build_command = vscode.commands.registerCommand("OBS_configs.buildEntry",
+														(config :BuilderConfigTreeEntry)=>{
+															vscode.window.showInformationMessage("building");
+															build_all(config.data);
+														});
+	context.subscriptions.push(build_command);
 }
 
 
@@ -220,7 +198,7 @@ async function create_OBS_Build_Conf(context: vscode.ExtensionContext){
 	else{
 		builder_name = result;
 	}
-	let builder:Builder;
+	let builder:Builder| undefined = undefined;
 	for(var i = 0; i < builders.length; i++)
 	{
 		if(builder_name  === builders[i].name)
@@ -229,18 +207,23 @@ async function create_OBS_Build_Conf(context: vscode.ExtensionContext){
 			break;
 		}
 	}
+	if(builder === undefined)
+	{
+		vscode.window.showErrorMessage("Selected builder does not exist. Aborting");
+		return;
+	}
 
 	let repostr: string = "";
-	const cp = require('child_process');
-	result = cp.execSync(
-							'osc repos',
-							{
-								"cwd": vscode.workspace.rootPath
-							});
-	if(result !== undefined)
+	let path = vscode.workspace.rootPath?.toString();
+	if(path === undefined)
 	{
-		repostr = result.toString();
+		vscode.window.showErrorMessage("workspace undefined");
+		return;
 	}
+	path += "/.osc/_build_repositories";
+	await vscode.workspace.openTextDocument(path).then((document) => {
+		repostr = document.getText();
+	  });
 
 	let splits = repostr.split("\n");
 
@@ -272,6 +255,20 @@ async function create_OBS_Build_Conf(context: vscode.ExtensionContext){
 	files.forEach(element => {
 		specPaths.push(element.fsPath);
 	});
+	result = vscode.workspace.rootPath?.toString();
+	if(result === undefined)
+	{
+		vscode.window.showErrorMessage("undefined workspace");
+		return;
+	}
+	else
+	{
+		var cwd: string = result;
+	}
+	for(var i = 0; i< specPaths.length; i++)
+	{
+		specPaths[i] = specPaths[i].replace(cwd,'').substr(1);
+	}
 	let specResult = await vscode.window.showQuickPick(specPaths,
 		{ canPickMany: true, placeHolder:"specfiles to build with this configuration" });
 	if(specResult === undefined)
@@ -283,13 +280,49 @@ async function create_OBS_Build_Conf(context: vscode.ExtensionContext){
 	{
 		var specFiles:string[] = specResult;
 	}
-	let buildConf: BuildConfiguration = new BuildConfiguration(name_res, repositories, specFiles);
+	let buildConf: BuildConfiguration = new BuildConfiguration(conifg_name, repositories, specFiles, builder);
 	let buildConfs: BuildConfiguration[] = context.workspaceState.get("BuildConfigurations",[]);
 	buildConfs.push(buildConf);
+	context.workspaceState.update("BuildConfigurations", buildConfs);
+}
+
+async function build_all(config: BuildConfiguration)
+{
+	for(var i = 0; i< config.repos.length; i++)
+	{
+		for(var j = 0; j < config.specFiles.length; j++)
+		{
+			await build(config.builder,config.repos[i], config.specFiles[j]);
+		}
+	}
 }
 
 
+async function build(builder: Builder, repo: Repository, specFile: string)
+{
 
+	var path = require('path');
+	let command: string = "osc build ";
+	let build_root: string = path.join(builder.buildroot, repo.name, repo.architecture, specFile);
+	command += " --root="+build_root;
+	command += " -j "+builder.threads;
+	command+=" "+repo.name+" "+ repo.architecture;
+	const cp = require('child_process');
+	try {
+		var result = cp.execSync(
+								command,
+								{
+									maxbuffer: 4194304,
+									cwd: vscode.workspace.rootPath
+								});
+	} catch (error) {
+		vscode.window.showErrorMessage("build threw up");
+		return;
+	}
+	let result_lines:string[] = result.split("RPMLINT report:")[1];
+	vscode.window.showInformationMessage(result_lines[0]);
+
+}
 
 
 
